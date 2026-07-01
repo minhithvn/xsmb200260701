@@ -10,39 +10,70 @@ mỗi 7 ngày một trang là gom được lịch sử dài, nhẹ cho server ng
 Tất cả giữ trong bộ nhớ (st.session_state) — không ghi file.
 """
 import re, math, random, datetime
+from html import unescape
 from collections import Counter
 from typing import List, Dict, Tuple
 
 import requests
 import streamlit as st
-from bs4 import BeautifulSoup
 
 N_LO = 27
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
-PRIZE_CLASSES = ["giaidb", "giai1", "giai2", "giai3", "giai4", "giai5", "giai6", "giai7"]
-DATE_RE = re.compile(r"(\d{2})-(\d{2})-(\d{4})")
+
+# (nhãn giải, số chữ số mỗi giải, số lượng giải) — cố định theo luật XSMB.
+# Không phụ thuộc tên class HTML nên bền khi minhngoc đổi giao diện.
+SPECS = [("nhất", 5, 1), ("nhì", 5, 2), ("ba", 5, 6), ("tư", 4, 4),
+         ("năm", 4, 6), ("sáu", 3, 3), ("bảy", 2, 4)]
 
 
 # ---------------- Parser ----------------
+def _collect(s: str, n: int) -> str:
+    """Lấy n chữ số đầu tiên trong chuỗi s (bỏ qua khoảng trắng/ký tự khác)."""
+    out = []
+    for ch in s:
+        if ch.isdigit():
+            out.append(ch)
+            if len(out) == n:
+                break
+    return "".join(out)
+
+
 def parse_page(html: str) -> Dict[str, List[int]]:
-    """Trả về {iso_date: [27 số lô]} cho MỌI bảng ngày có trên trang."""
-    soup = BeautifulSoup(html, "html.parser")
+    """Trả về {iso_date: [27 số lô]} cho MỌI bảng ngày có trên trang.
+
+    Cách làm: xoá thẻ HTML -> bám nhãn 'Giải ...' -> lấy đúng số chữ số cố định
+    của từng giải -> lấy 2 số cuối. Bền với thay đổi class/div của minhngoc.
+    """
+    text = unescape(re.sub(r"<[^>]+>", " ", html))
     out: Dict[str, List[int]] = {}
-    for tbl in soup.find_all("table", class_="bkqmienbac"):
-        # ngày của bảng: lấy match dd-mm-yyyy đầu tiên trong bảng
-        m = DATE_RE.search(tbl.get_text(" "))
-        if not m:
+    starts = [m.start() for m in re.finditer(r"Giải\s+(?:ĐB|Đặc\s+Biệt)", text)]
+    starts.append(len(text))
+    for i in range(len(starts) - 1):
+        seg = text[starts[i]:starts[i + 1]]
+        pre = text[max(0, starts[i] - 400):starts[i]]
+        dm = re.findall(r"(\d{2})/(\d{2})/(\d{4})", pre)   # ngày dạng dd/mm/yyyy
+        if not dm:
             continue
-        dd, mm, yyyy = m.groups()
-        iso = f"{yyyy}-{mm}-{dd}"
-        lo: List[int] = []
-        for css in PRIZE_CLASSES:
-            for div in tbl.select(f"td.{css} div"):
-                t = div.get_text(strip=True)
-                if t.isdigit():
-                    lo.append(int(t[-2:]))
-        if len(lo) >= 20:          # bảng đủ dữ liệu
+        dd, mm, yy = dm[-1]
+        iso = f"{yy}-{mm}-{dd}"
+        # Giải ĐB: 5 chữ số ngay sau nhãn
+        after = re.sub(r"^\s*Giải\s+(?:ĐB|Đặc\s+Biệt)", "", seg, count=1)
+        db = _collect(after, 5)
+        if len(db) < 5:
+            continue
+        lo = [int(db[-2:])]
+        ok = True
+        for label, width, count in SPECS:
+            lm = re.search(r"Giải\s+" + label, seg)
+            if not lm:
+                ok = False; break
+            digs = _collect(seg[lm.end():], width * count)
+            if len(digs) < width * count:
+                ok = False; break
+            for j in range(count):
+                lo.append(int(digs[j * width:(j + 1) * width][-2:]))
+        if ok and len(lo) == N_LO:
             out[iso] = lo
     return out
 
