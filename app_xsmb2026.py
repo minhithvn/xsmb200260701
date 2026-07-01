@@ -217,19 +217,26 @@ if hist:
         if len(days) < 90:
             st.warning(f"Mới có {len(days)} kỳ; nên lấy ≥ 90 kỳ để backtest ổn định.")
         k = st.slider("Số con chọn mỗi ngày", 3, 15, 5)
+        # warmup tự co theo dữ liệu, luôn chừa lại ngày để kiểm thử
+        warmup = min(60, max(10, len(days) // 3))
         if st.button("Chạy backtest"):
-            res, trials = backtest(days, k)
+            res, trials = backtest(days, k, warmup=warmup)
             n = trials * k
-            table = []
-            for name, hits in sorted(res.items(), key=lambda x: -x[1]):
-                lo, hi = wilson_ci(hits, n)
-                table.append({"Chiến lược": name,
-                              "Tỷ lệ trúng": f"{hits / n * 100:.2f}%",
-                              "KTC 95%": f"{lo * 100:.2f}–{hi * 100:.2f}%"})
-            st.table(table)
-            st.caption(f"Nếu KTC 95% của 'nóng'/'gan' phủ base rate {br*100:.1f}% và chồng "
-                       "lên 'ngẫu nhiên' ⇒ phương pháp KHÔNG có ý nghĩa thống kê. "
-                       "Đây là kết quả kỳ vọng với xổ số công bằng.")
+            if n == 0:
+                st.warning(f"Chưa đủ dữ liệu để backtest (cần > {warmup} kỳ, "
+                           f"hiện có {len(days)}). Hãy lấy thêm lịch sử ở phía trên.")
+            else:
+                st.caption(f"Khởi động {warmup} kỳ · kiểm thử trên {trials} kỳ.")
+                table = []
+                for name, hits in sorted(res.items(), key=lambda x: -x[1]):
+                    lo, hi = wilson_ci(hits, n)
+                    table.append({"Chiến lược": name,
+                                  "Tỷ lệ trúng": f"{hits / n * 100:.2f}%",
+                                  "KTC 95%": f"{lo * 100:.2f}–{hi * 100:.2f}%"})
+                st.table(table)
+                st.caption(f"Nếu KTC 95% của 'nóng'/'gan' phủ base rate {br*100:.1f}% và chồng "
+                           "lên 'ngẫu nhiên' ⇒ phương pháp KHÔNG có ý nghĩa thống kê. "
+                           "Đây là kết quả kỳ vọng với xổ số công bằng.")
 
     with tab3:
         st.caption("Bảng mô tả quá khứ (không phải dự đoán). Sắp theo số lần về giảm dần.")
